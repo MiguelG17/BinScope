@@ -4,13 +4,13 @@
 
 The goal of the project is to inspect executable files and provide useful information for reverse engineering, malware analysis, and security research.
 
-The project is being developed from scratch as a learning project focused on **Rust, binary formats, systems programming, and cybersecurity**.
+The project is being developed from scratch as a learning project focused on **Rust, binary formats, systems programming, reverse engineering, and cybersecurity**.
 
 > **Status:** Early development
 
 ## Goals
 
-BinScope aims to progressively support static analysis of common executable formats and provide a modular analysis engine.
+BinScope aims to progressively support static analysis of common executable formats through a modular analysis engine.
 
 Planned capabilities include:
 
@@ -27,15 +27,16 @@ Planned capabilities include:
 * Suspicious API detection
 * JSON report generation
 
-The project will initially focus on a command-line interface (CLI). A graphical interface may be considered once the analysis engine is mature.
+The project will initially focus on a **command-line interface (CLI)**. A graphical interface may be considered once the analysis engine is mature.
 
 ## Why BinScope?
 
 Understanding how executable files are structured is fundamental to reverse engineering and malware analysis.
 
-Rather than relying entirely on existing tools, BinScope is being developed from the ground up to understand and implement the underlying concepts:
+Rather than relying entirely on existing analysis libraries, BinScope is being developed from the ground up to understand and implement the underlying concepts:
 
 * Binary file formats
+* Binary parsing
 * Executable loading
 * PE and ELF structures
 * Sections and segments
@@ -46,27 +47,36 @@ Rather than relying entirely on existing tools, BinScope is being developed from
 * Security mitigations
 * x86/x86-64 instructions
 
+External libraries will be introduced selectively when they provide functionality outside the primary learning objectives of the project.
+
 ## Technology
 
 * **Rust**
 * Cargo
 * Git / GitHub
+* GitHub Actions
 
-External libraries will be introduced selectively when they provide functionality that is outside the primary learning objectives of the project.
+The project currently uses Rust's standard library for binary reading and format detection. External dependencies will be added deliberately as the project grows.
 
 ## Project Status
 
-BinScope is currently in the initial project setup phase.
+BinScope is currently in the **foundation and binary detection phase**.
 
 Current progress:
 
 * [x] Rust project created
 * [x] Git repository initialized
 * [x] Initial project commit
-* [ ] GitHub repository
-* [ ] Continuous Integration
+* [x] GitHub repository
+* [x] Continuous Integration
+* [x] Initial project architecture
+* [x] Binary format abstraction
+* [x] Initial PE signature detection
+* [x] Initial ELF signature detection
+* [x] Unit tests
 * [ ] CLI foundation
-* [ ] File type detection
+* [ ] Robust file type detection
+* [ ] Architecture detection
 * [ ] PE parser
 * [ ] ELF parser
 * [ ] Static analysis modules
@@ -76,17 +86,19 @@ Current progress:
 
 ### Phase 1 — Foundation
 
-* [ ] Project architecture
+* [x] Project architecture
+* [x] Initial error-free build
+* [x] Testing infrastructure
+* [x] Continuous Integration
 * [ ] CLI foundation
 * [ ] Error handling
 * [ ] Logging
-* [ ] Testing infrastructure
-* [ ] Continuous Integration
 
 ### Phase 2 — Binary Detection
 
-* [ ] Read binary files
-* [ ] Detect file format
+* [x] Initial binary signature detection
+* [ ] Read binary files from CLI
+* [ ] Robust file format detection
 * [ ] Detect architecture
 * [ ] Detect endianness
 * [ ] Basic file metadata
@@ -113,7 +125,7 @@ Current progress:
 ### Phase 5 — Static Analysis
 
 * [ ] Strings
-* [ ] Hashes
+* [ ] Cryptographic hashes
 * [ ] Entropy
 * [ ] Security mitigations
 * [ ] Suspicious imports
@@ -145,7 +157,7 @@ cargo build
 Run BinScope:
 
 ```bash
-cargo run
+cargo run -- <file>
 ```
 
 Run tests:
@@ -154,17 +166,30 @@ Run tests:
 cargo test
 ```
 
-Format the code:
+Check formatting:
 
 ```bash
-cargo fmt
+cargo fmt --all -- --check
 ```
 
 Run Clippy:
 
 ```bash
-cargo clippy
+cargo clippy --all-targets --all-features -- -D warnings
 ```
+
+## Continuous Integration
+
+Every push to `main` and every pull request targeting `main` is checked automatically using GitHub Actions.
+
+The CI pipeline currently verifies:
+
+* Rust formatting with `rustfmt`
+* Compilation with `cargo check`
+* Unit tests with `cargo test`
+* Code quality with Clippy
+
+Warnings are treated as errors during Clippy checks to maintain a clean codebase.
 
 ## Learning Objectives
 
@@ -180,7 +205,14 @@ BinScope is also a practical exploration of:
 * Static malware analysis
 * Software testing
 * CI/CD
+* Git and GitHub workflows
 * Open-source development
+
+## Security Scope
+
+BinScope is intended for **defensive security research, reverse engineering, malware analysis, and educational purposes**.
+
+The project focuses on understanding executable formats and extracting information from binaries without executing them.
 
 ## License
 
