@@ -1,9 +1,23 @@
 mod binary;
 
+use std::env;
+use std::fs;
+
 fn main() {
-    let data = [0x4D, 0x5A];
+    let args: Vec<String> = env::args().collect();
 
-    let format = binary::detect_format(&data);
+    if args.len() < 2 {
+        eprintln!("Use: cargo run -- <ruta_del_archivo>");
+        return;
+    }
 
-    println!("{:?}", format);
+    match fs::read(&args[1]) {
+        Ok(bytes) => {
+            let format = binary::detect_format(&bytes);
+            println!("{:?}", format);
+        }
+        Err(error) => {
+            eprintln!("Error reading the file: {}", error);
+        }
+    }
 }
