@@ -1,7 +1,7 @@
 mod binary;
+mod binary_file;
 
 use std::env;
-use std::fs;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -11,11 +11,13 @@ fn main() {
         return;
     }
 
-    match fs::read(&args[1]) {
-        Ok(bytes) => {
-            let format = binary::detect_format(&bytes);
+    match binary_file::load_file(&args[1]) {
+        Ok(binary_file) => {
+            let format = binary::detect_format(&binary_file.data);
             println!("{:?}", format);
+            println!("The path is {}", binary_file.path);
         }
+
         Err(error) => {
             eprintln!("Error reading the file: {}", error);
         }
