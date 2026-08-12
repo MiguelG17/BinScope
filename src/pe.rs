@@ -9,6 +9,15 @@ const NUMBER_OF_SYMBOLS_SIZE: usize = 4;
 const SIZE_OF_OPTIONAL_HEADER_SIZE: usize = 2;
 const CHARACTERISTICS_SIZE: usize = 2;
 
+const MAGIC_SIZE: usize = 2;
+const MAJOR_LINKER_VERSION_SIZE: usize = 1;
+const MINOR_LINKER_VERSION_SIZE: usize = 1;
+const SIZE_OF_CODE_SIZE: usize = 4;
+const SIZE_OF_INITIALIZED_DATA_SIZE: usize = 4;
+const SIZE_OF_UNITIALIZED_DATA_SIZE: usize = 4;
+const ADDRESS_OF_ENTRY_POINT_SIZE: usize = 4;
+const BASE_OF_CODE_SIZE: usize = 4;
+
 #[derive(Debug, PartialEq)]
 pub enum PeError {
     FileTooSmall,
@@ -16,6 +25,7 @@ pub enum PeError {
     InvalidPeSignature,
     InvalidOffset,
 }
+
 #[derive(Debug, PartialEq)]
 pub struct CoffHeader {
     pub machine: u16,
@@ -26,10 +36,31 @@ pub struct CoffHeader {
     pub size_of_optional_header: u16,
     pub characteristics: u16,
 }
+
+#[derive(Debug, PartialEq)]
+pub struct OptionalHeader {
+    pub magic: Magic,
+    pub major_linker_version: u8,
+    pub minor_linker_version: u8,
+    pub size_of_code: u32,
+    pub size_of_initialized_data: u32,
+    pub size_of_unitialized_data: u32,
+    pub address_of_entry_point: u32,
+    pub base_of_code: u32,
+}
+
 #[derive(Debug, PartialEq)]
 pub struct PeFile {
     pub e_lfanew: u32,
     pub coff_header: CoffHeader,
+    pub optional_header: OptionalHeader,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Magic {
+    PE32,
+    PE32Plus,
+    Unknown,
 }
 
 pub fn parse(data: &[u8]) -> Result<PeFile, PeError> {
@@ -40,9 +71,7 @@ pub fn parse(data: &[u8]) -> Result<PeFile, PeError> {
         return Err(PeError::InvalidDosSignature);
     }
     let e_lfanew_bytes = &data[0x3C..0x40];
-
     let e_lfanew = u32::from_le_bytes(e_lfanew_bytes.try_into().unwrap());
-
     let pe_offset = e_lfanew as usize;
 
     let pe_signature = checked_range(data, pe_offset, PE_SIGNATURE_SIZE)?;
@@ -53,42 +82,94 @@ pub fn parse(data: &[u8]) -> Result<PeFile, PeError> {
     let mut current_offset = pe_offset + PE_SIGNATURE_SIZE;
 
     let pe_machine = checked_range(data, current_offset, MACHINE_SIZE)?;
-
     let machine = u16::from_le_bytes(pe_machine.try_into().unwrap());
     current_offset += MACHINE_SIZE;
 
     let pe_number_of_sections = checked_range(data, current_offset, NUMBER_OF_SECTIONS_SIZE)?;
-
     let number_of_sections = u16::from_le_bytes(pe_number_of_sections.try_into().unwrap());
     current_offset += NUMBER_OF_SECTIONS_SIZE;
 
     let pe_time_date_stamp = checked_range(data, current_offset, TIME_DATE_STAMP_SIZE)?;
-
     let time_date_stamp = u32::from_le_bytes(pe_time_date_stamp.try_into().unwrap());
     current_offset += TIME_DATE_STAMP_SIZE;
 
     let pe_pointer_to_symbol_table =
         checked_range(data, current_offset, POINTER_TO_SYMBOL_TABLE_SIZE)?;
-
     let pointer_to_symbol_table =
         u32::from_le_bytes(pe_pointer_to_symbol_table.try_into().unwrap());
     current_offset += POINTER_TO_SYMBOL_TABLE_SIZE;
 
     let pe_number_of_symbols = checked_range(data, current_offset, NUMBER_OF_SYMBOLS_SIZE)?;
-
     let number_of_symbols = u32::from_le_bytes(pe_number_of_symbols.try_into().unwrap());
     current_offset += NUMBER_OF_SYMBOLS_SIZE;
 
     let pe_size_of_optional_header =
         checked_range(data, current_offset, SIZE_OF_OPTIONAL_HEADER_SIZE)?;
-
     let size_of_optional_header =
         u16::from_le_bytes(pe_size_of_optional_header.try_into().unwrap());
     current_offset += SIZE_OF_OPTIONAL_HEADER_SIZE;
 
     let pe_characteristics = checked_range(data, current_offset, CHARACTERISTICS_SIZE)?;
-
     let characteristics = u16::from_le_bytes(pe_characteristics.try_into().unwrap());
+    current_offset += CHARACTERISTICS_SIZE;
+
+    let mut optional_offset = 0;
+
+    let optional_header = checked_range(data, current_offset, size_of_optional_header as usize)?;
+    let magic_bytes = checked_range(optional_header, 0, MAGIC_SIZE)?;
+    let magic_val = u16::from_le_bytes(magic_bytes[0..2].try_into().unwrap());
+    optional_offset += MAGIC_SIZE;
+
+    let major_linker_version_bytes =
+        checked_range(optional_header, optional_offset, MAJOR_LINKER_VERSION_SIZE)?;
+    let major_linker_version = u8::from_le_bytes(major_linker_version_bytes.try_into().unwrap());
+    optional_offset += MAJOR_LINKER_VERSION_SIZE;
+
+    let minor_linker_version_bytes =
+        checked_range(optional_header, optional_offset, MINOR_LINKER_VERSION_SIZE)?;
+    let minor_linker_version = u8::from_le_bytes(minor_linker_version_bytes.try_into().unwrap());
+    optional_offset += MINOR_LINKER_VERSION_SIZE;
+
+    let size_of_code_bytes = checked_range(optional_header, optional_offset, SIZE_OF_CODE_SIZE)?;
+    let size_of_code = u32::from_le_bytes(size_of_code_bytes.try_into().unwrap());
+    optional_offset += SIZE_OF_CODE_SIZE;
+
+    let size_of_initialized_data_bytes = checked_range(
+        optional_header,
+        optional_offset,
+        SIZE_OF_INITIALIZED_DATA_SIZE,
+    )?;
+    let size_of_initialized_data =
+        u32::from_le_bytes(size_of_initialized_data_bytes.try_into().unwrap());
+    optional_offset += SIZE_OF_INITIALIZED_DATA_SIZE;
+
+    let size_of_unitialized_data_bytes = checked_range(
+        optional_header,
+        optional_offset,
+        SIZE_OF_UNITIALIZED_DATA_SIZE,
+    )?;
+    let size_of_unitialized_data =
+        u32::from_le_bytes(size_of_unitialized_data_bytes.try_into().unwrap());
+    optional_offset += SIZE_OF_UNITIALIZED_DATA_SIZE;
+
+    let address_of_entry_point_bytes = checked_range(
+        optional_header,
+        optional_offset,
+        ADDRESS_OF_ENTRY_POINT_SIZE,
+    )?;
+    let address_of_entry_point =
+        u32::from_le_bytes(address_of_entry_point_bytes.try_into().unwrap());
+    optional_offset += ADDRESS_OF_ENTRY_POINT_SIZE;
+
+    let base_of_code_bytes = checked_range(optional_header, optional_offset, BASE_OF_CODE_SIZE)?;
+    let base_of_code = u32::from_le_bytes(base_of_code_bytes.try_into().unwrap());
+    let _ = optional_offset; // Evita el aviso de asignación no leída
+
+    let magic = match magic_val {
+        0x10B => Magic::PE32,
+        0x20B => Magic::PE32Plus,
+        _ => Magic::Unknown,
+    };
 
     Ok(PeFile {
         e_lfanew,
@@ -100,6 +181,16 @@ pub fn parse(data: &[u8]) -> Result<PeFile, PeError> {
             number_of_symbols,
             size_of_optional_header,
             characteristics,
+        },
+        optional_header: OptionalHeader {
+            magic,
+            major_linker_version,
+            minor_linker_version,
+            size_of_code,
+            size_of_initialized_data,
+            size_of_unitialized_data,
+            address_of_entry_point,
+            base_of_code,
         },
     })
 }
@@ -126,9 +217,14 @@ mod tests {
         + SIZE_OF_OPTIONAL_HEADER_SIZE
         + CHARACTERISTICS_SIZE;
 
-    fn create_valid_pe_buffer(e_lfanew: u32, coff_header: &CoffHeader) -> Vec<u8> {
+    fn create_valid_pe_buffer(
+        e_lfanew: u32,
+        coff_header: &CoffHeader,
+        optional_header: Option<(&OptionalHeader, u16)>,
+    ) -> Vec<u8> {
         let pe_offset = e_lfanew as usize;
-        let total_size = pe_offset + PE_SIGNATURE_SIZE + COFF_HEADER_SIZE;
+        let opt_size = coff_header.size_of_optional_header as usize;
+        let total_size = pe_offset + PE_SIGNATURE_SIZE + COFF_HEADER_SIZE + opt_size;
         let mut buffer = vec![0u8; total_size];
 
         // Firma DOS "MZ"
@@ -168,6 +264,39 @@ mod tests {
 
         buffer[curr..curr + CHARACTERISTICS_SIZE]
             .copy_from_slice(&coff_header.characteristics.to_le_bytes());
+        curr += CHARACTERISTICS_SIZE;
+
+        if let Some((opt, magic_val)) = optional_header
+            && opt_size >= 24
+        {
+            buffer[curr..curr + MAGIC_SIZE].copy_from_slice(&magic_val.to_le_bytes());
+            curr += MAGIC_SIZE;
+
+            buffer[curr..curr + MAJOR_LINKER_VERSION_SIZE]
+                .copy_from_slice(&opt.major_linker_version.to_le_bytes());
+            curr += MAJOR_LINKER_VERSION_SIZE;
+
+            buffer[curr..curr + MINOR_LINKER_VERSION_SIZE]
+                .copy_from_slice(&opt.minor_linker_version.to_le_bytes());
+            curr += MINOR_LINKER_VERSION_SIZE;
+
+            buffer[curr..curr + SIZE_OF_CODE_SIZE].copy_from_slice(&opt.size_of_code.to_le_bytes());
+            curr += SIZE_OF_CODE_SIZE;
+
+            buffer[curr..curr + SIZE_OF_INITIALIZED_DATA_SIZE]
+                .copy_from_slice(&opt.size_of_initialized_data.to_le_bytes());
+            curr += SIZE_OF_INITIALIZED_DATA_SIZE;
+
+            buffer[curr..curr + SIZE_OF_UNITIALIZED_DATA_SIZE]
+                .copy_from_slice(&opt.size_of_unitialized_data.to_le_bytes());
+            curr += SIZE_OF_UNITIALIZED_DATA_SIZE;
+
+            buffer[curr..curr + ADDRESS_OF_ENTRY_POINT_SIZE]
+                .copy_from_slice(&opt.address_of_entry_point.to_le_bytes());
+            curr += ADDRESS_OF_ENTRY_POINT_SIZE;
+
+            buffer[curr..curr + BASE_OF_CODE_SIZE].copy_from_slice(&opt.base_of_code.to_le_bytes());
+        }
 
         buffer
     }
@@ -184,7 +313,18 @@ mod tests {
             characteristics: 0x0022,
         };
 
-        let buffer = create_valid_pe_buffer(0x80, &coff_header);
+        let optional_header = OptionalHeader {
+            magic: Magic::PE32Plus,
+            major_linker_version: 14,
+            minor_linker_version: 0,
+            size_of_code: 0x1000,
+            size_of_initialized_data: 0x2000,
+            size_of_unitialized_data: 0,
+            address_of_entry_point: 0x1234,
+            base_of_code: 0x1000,
+        };
+
+        let buffer = create_valid_pe_buffer(0x80, &coff_header, Some((&optional_header, 0x20B)));
 
         let result = parse(&buffer);
 
@@ -193,6 +333,7 @@ mod tests {
             Ok(PeFile {
                 e_lfanew: 0x80,
                 coff_header,
+                optional_header,
             })
         );
     }
@@ -218,11 +359,11 @@ mod tests {
             time_date_stamp: 0,
             pointer_to_symbol_table: 0,
             number_of_symbols: 0,
-            size_of_optional_header: 0,
+            size_of_optional_header: 0x00F0,
             characteristics: 0,
         };
 
-        let mut buffer = create_valid_pe_buffer(0x80, &coff_header);
+        let mut buffer = create_valid_pe_buffer(0x80, &coff_header, None);
         buffer[0x80..0x84].copy_from_slice(b"FAIL");
         assert_eq!(parse(&buffer), Err(PeError::InvalidPeSignature));
     }
