@@ -75,6 +75,38 @@ pub struct PeFile {
     pub sections: Vec<SectionHeader>,
 }
 
+// impl PeFile {
+//     pub fn rva_to_file_offset(&self, rva: u32) -> Option<u32> {
+//         for section in &self.sections {
+//             let section_start = section.virtual_address;
+//             let section_end = section_start + section.size_of_raw_data;
+
+//             if rva >= section_start && rva < section_end {
+//                 return Some(
+//                     section.pointer_to_raw_data
+//                         + (rva - section.virtual_address),
+//                 );
+//             }
+//         }
+
+//         None
+//     }
+// }
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum SectionCharacteristic {
+    Code,
+    InitializedData,
+    UninitializedData,
+    Discardable,
+    NotCached,
+    NotPaged,
+    Shared,
+    Executable,
+    Readable,
+    Writable,
+}
+
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Magic {
     PE32,
@@ -93,6 +125,7 @@ pub struct SectionHeader {
     pub number_of_relocations: u16,
     pub number_of_linenumbers: u16,
     pub characteristics: u32,
+    pub characteristic_flags: Vec<SectionCharacteristic>,
 }
 
 pub fn parse(data: &[u8]) -> Result<PeFile, PeError> {
@@ -266,6 +299,7 @@ fn parse_section_header(data: &[u8], offset: &mut usize) -> Result<SectionHeader
     let number_of_relocations = read_u16(data, offset)?;
     let number_of_linenumbers = read_u16(data, offset)?;
     let characteristics = read_u32(data, offset)?;
+    let characteristic_flags = parse_section_characteristics(characteristics);
 
     Ok(SectionHeader {
         name,
@@ -278,7 +312,54 @@ fn parse_section_header(data: &[u8], offset: &mut usize) -> Result<SectionHeader
         number_of_relocations,
         number_of_linenumbers,
         characteristics,
+        characteristic_flags,
     })
+}
+
+fn parse_section_characteristics(value: u32) -> Vec<SectionCharacteristic> {
+    let mut flags = Vec::new();
+
+    if value & 0x00000020 != 0 {
+        flags.push(SectionCharacteristic::Code);
+    }
+
+    if value & 0x00000040 != 0 {
+        flags.push(SectionCharacteristic::InitializedData);
+    }
+
+    if value & 0x00000080 != 0 {
+        flags.push(SectionCharacteristic::UninitializedData);
+    }
+
+    if value & 0x02000000 != 0 {
+        flags.push(SectionCharacteristic::Discardable);
+    }
+
+    if value & 0x04000000 != 0 {
+        flags.push(SectionCharacteristic::NotCached);
+    }
+
+    if value & 0x08000000 != 0 {
+        flags.push(SectionCharacteristic::NotPaged);
+    }
+
+    if value & 0x10000000 != 0 {
+        flags.push(SectionCharacteristic::Shared);
+    }
+
+    if value & 0x20000000 != 0 {
+        flags.push(SectionCharacteristic::Executable);
+    }
+
+    if value & 0x40000000 != 0 {
+        flags.push(SectionCharacteristic::Readable);
+    }
+
+    if value & 0x80000000 != 0 {
+        flags.push(SectionCharacteristic::Writable);
+    }
+
+    flags
 }
 
 fn checked_range(data: &[u8], start: usize, size: usize) -> Result<&[u8], PeError> {
@@ -707,6 +788,11 @@ mod tests {
             number_of_relocations: 0,
             number_of_linenumbers: 0,
             characteristics: 0x60000020,
+            characteristic_flags: vec![
+                SectionCharacteristic::Code,
+                SectionCharacteristic::Executable,
+                SectionCharacteristic::Readable,
+            ],
         }];
 
         let buffer = create_valid_pe_buffer(0x80, &coff_header, Some(&optional_header), &sections);
@@ -828,4 +914,51 @@ mod tests {
 
         assert_eq!(parse(&buffer), Err(PeError::InvalidOffset));
     }
+
+    // #[test]
+    // fn test_rva_to_file_offset() {
+    //     let pe = PeFile {
+    //         e_lfanew: 0x80,
+
+    //         coff_header: CoffHeader {
+    //             machine: 0x8664,
+    //             number_of_sections: 1,
+    //             time_date_stamp: 0,
+    //             pointer_to_symbol_table: 0,
+    //             number_of_symbols: 0,
+    //             size_of_optional_header: 0xF0,
+    //             characteristics: 0x22,
+    //         },
+
+    //         optional_header: OptionalHeader::PE32Plus(OptionalHeader64 {
+    //             common: sample_common(Magic::PE32Plus),
+    //             image_base: 0x140000000,
+    //         }),
+
+    //         sections: vec![
+    //             SectionHeader {
+    //                 name: *b".text\0\0\0",
+    //                 virtual_size: 0x1000,
+    //                 virtual_address: 0x1000,
+    //                 size_of_raw_data: 0x1000,
+    //                 pointer_to_raw_data: 0x400,
+    //                 pointer_to_relocations: 0,
+    //                 pointer_to_linenumbers: 0,
+    //                 number_of_relocations: 0,
+    //                 number_of_linenumbers: 0,
+    //                 characteristics: 0x60000020,
+    //                 characteristic_flags: vec![
+    //                     SectionCharacteristic::Code,
+    //                     SectionCharacteristic::Executable,
+    //                     SectionCharacteristic::Readable,
+    //                 ],
+    //             }
+    //         ],
+    //     };
+
+    //     assert_eq!(
+    //         pe.rva_to_file_offset(0x1234),
+    //         Some(0x634)
+    //     );
+    // }
 }
