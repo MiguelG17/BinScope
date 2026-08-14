@@ -72,12 +72,27 @@ pub struct PeFile {
     pub e_lfanew: u32,
     pub coff_header: CoffHeader,
     pub optional_header: OptionalHeader,
+    pub sections: Vec<SectionHeader>,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Magic {
     PE32,
     PE32Plus,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct SectionHeader {
+    pub name: [u8; 8],
+    pub virtual_size: u32,
+    pub virtual_address: u32,
+    pub size_of_raw_data: u32,
+    pub pointer_to_raw_data: u32,
+    pub pointer_to_relocations: u32,
+    pub pointer_to_linenumbers: u32,
+    pub number_of_relocations: u16,
+    pub number_of_linenumbers: u16,
+    pub characteristics: u32,
 }
 
 pub fn parse(data: &[u8]) -> Result<PeFile, PeError> {
@@ -212,6 +227,14 @@ pub fn parse(data: &[u8]) -> Result<PeFile, PeError> {
         }),
     };
 
+    let mut section_table = current_offset + size_of_optional_header as usize;
+    let mut sections = Vec::with_capacity(number_of_sections as usize);
+
+    for _ in 0..number_of_sections {
+        let section = parse_section_header(data, &mut section_table)?;
+        sections.push(section);
+    }
+
     Ok(PeFile {
         e_lfanew,
         coff_header: CoffHeader {
@@ -224,6 +247,37 @@ pub fn parse(data: &[u8]) -> Result<PeFile, PeError> {
             characteristics,
         },
         optional_header,
+        sections,
+    })
+}
+
+fn parse_section_header(data: &[u8], offset: &mut usize) -> Result<SectionHeader, PeError> {
+    let name_bytes = checked_range(data, *offset, 8)?;
+    let mut name = [0u8; 8];
+    name.copy_from_slice(name_bytes);
+    *offset += 8;
+
+    let virtual_size = read_u32(data, offset)?;
+    let virtual_address = read_u32(data, offset)?;
+    let size_of_raw_data = read_u32(data, offset)?;
+    let pointer_to_raw_data = read_u32(data, offset)?;
+    let pointer_to_relocations = read_u32(data, offset)?;
+    let pointer_to_linenumbers = read_u32(data, offset)?;
+    let number_of_relocations = read_u16(data, offset)?;
+    let number_of_linenumbers = read_u16(data, offset)?;
+    let characteristics = read_u32(data, offset)?;
+
+    Ok(SectionHeader {
+        name,
+        virtual_size,
+        virtual_address,
+        size_of_raw_data,
+        pointer_to_raw_data,
+        pointer_to_relocations,
+        pointer_to_linenumbers,
+        number_of_relocations,
+        number_of_linenumbers,
+        characteristics,
     })
 }
 
@@ -301,6 +355,8 @@ mod tests {
         + SIZE_OF_OPTIONAL_HEADER_SIZE
         + CHARACTERISTICS_SIZE;
 
+    const SECTION_HEADER_SIZE: usize = 40;
+
     fn serialize_common(curr: &mut usize, buffer: &mut [u8], common: &OptionalHeaderCommon) {
         buffer[*curr..*curr + MAJOR_LINKER_VERSION_SIZE]
             .copy_from_slice(&common.major_linker_version.to_le_bytes());
@@ -365,16 +421,48 @@ mod tests {
         buffer[*curr..*curr + 2].copy_from_slice(&common.subsystem.to_le_bytes());
         *curr += 2;
         buffer[*curr..*curr + 2].copy_from_slice(&common.dll_characteristics.to_le_bytes());
+        *curr += 2;
+    }
+
+    fn serialize_section_header(curr: &mut usize, buffer: &mut [u8], section: &SectionHeader) {
+        buffer[*curr..*curr + 8].copy_from_slice(&section.name);
+        *curr += 8;
+        buffer[*curr..*curr + 4].copy_from_slice(&section.virtual_size.to_le_bytes());
+        *curr += 4;
+        buffer[*curr..*curr + 4].copy_from_slice(&section.virtual_address.to_le_bytes());
+        *curr += 4;
+        buffer[*curr..*curr + 4].copy_from_slice(&section.size_of_raw_data.to_le_bytes());
+        *curr += 4;
+        buffer[*curr..*curr + 4].copy_from_slice(&section.pointer_to_raw_data.to_le_bytes());
+        *curr += 4;
+        buffer[*curr..*curr + 4].copy_from_slice(&section.pointer_to_relocations.to_le_bytes());
+        *curr += 4;
+        buffer[*curr..*curr + 4].copy_from_slice(&section.pointer_to_linenumbers.to_le_bytes());
+        *curr += 4;
+        buffer[*curr..*curr + 2].copy_from_slice(&section.number_of_relocations.to_le_bytes());
+        *curr += 2;
+        buffer[*curr..*curr + 2].copy_from_slice(&section.number_of_linenumbers.to_le_bytes());
+        *curr += 2;
+        buffer[*curr..*curr + 4].copy_from_slice(&section.characteristics.to_le_bytes());
+        *curr += 4;
     }
 
     fn create_valid_pe_buffer(
         e_lfanew: u32,
         coff_header: &CoffHeader,
         optional_header: Option<&OptionalHeader>,
+        sections: &[SectionHeader],
     ) -> Vec<u8> {
         let pe_offset = e_lfanew as usize;
         let opt_size = coff_header.size_of_optional_header as usize;
-        let total_size = pe_offset + PE_SIGNATURE_SIZE + COFF_HEADER_SIZE + opt_size;
+        let section_size = SECTION_HEADER_SIZE;
+
+        let total_size = pe_offset
+            + PE_SIGNATURE_SIZE
+            + COFF_HEADER_SIZE
+            + opt_size
+            + sections.len() * section_size;
+
         let mut buffer = vec![0u8; total_size];
 
         // Firma DOS "MZ"
@@ -451,6 +539,54 @@ mod tests {
             }
         }
 
+        for sec in sections {
+            serialize_section_header(&mut curr, &mut buffer, sec);
+        }
+
+        let mut section_offset = pe_offset + PE_SIGNATURE_SIZE + COFF_HEADER_SIZE + opt_size;
+
+        for section in sections {
+            buffer[section_offset..section_offset + 8].copy_from_slice(&section.name);
+            section_offset += 8;
+
+            buffer[section_offset..section_offset + 4]
+                .copy_from_slice(&section.virtual_size.to_le_bytes());
+            section_offset += 4;
+
+            buffer[section_offset..section_offset + 4]
+                .copy_from_slice(&section.virtual_address.to_le_bytes());
+            section_offset += 4;
+
+            buffer[section_offset..section_offset + 4]
+                .copy_from_slice(&section.size_of_raw_data.to_le_bytes());
+            section_offset += 4;
+
+            buffer[section_offset..section_offset + 4]
+                .copy_from_slice(&section.pointer_to_raw_data.to_le_bytes());
+            section_offset += 4;
+
+            buffer[section_offset..section_offset + 4]
+                .copy_from_slice(&section.pointer_to_relocations.to_le_bytes());
+            section_offset += 4;
+
+            buffer[section_offset..section_offset + 4]
+                .copy_from_slice(&section.pointer_to_linenumbers.to_le_bytes());
+            section_offset += 4;
+
+            buffer[section_offset..section_offset + 2]
+                .copy_from_slice(&section.number_of_relocations.to_le_bytes());
+            section_offset += 2;
+
+            buffer[section_offset..section_offset + 2]
+                .copy_from_slice(&section.number_of_linenumbers.to_le_bytes());
+            section_offset += 2;
+
+            buffer[section_offset..section_offset + 4]
+                .copy_from_slice(&section.characteristics.to_le_bytes());
+
+            section_offset += 4;
+        }
+
         buffer
     }
 
@@ -485,7 +621,7 @@ mod tests {
     fn test_valid_pe32_parsing() {
         let coff_header = CoffHeader {
             machine: 0x014C,
-            number_of_sections: 3,
+            number_of_sections: 0,
             time_date_stamp: 0x60000000,
             pointer_to_symbol_table: 0,
             number_of_symbols: 0,
@@ -499,7 +635,7 @@ mod tests {
             image_base: 0x00400000,
         });
 
-        let buffer = create_valid_pe_buffer(0x80, &coff_header, Some(&optional_header));
+        let buffer = create_valid_pe_buffer(0x80, &coff_header, Some(&optional_header), &[]);
         let result = parse(&buffer);
 
         assert_eq!(
@@ -508,6 +644,7 @@ mod tests {
                 e_lfanew: 0x80,
                 coff_header,
                 optional_header,
+                sections: vec![],
             })
         );
     }
@@ -516,7 +653,7 @@ mod tests {
     fn test_valid_pe32plus_parsing() {
         let coff_header = CoffHeader {
             machine: 0x8664,
-            number_of_sections: 6,
+            number_of_sections: 0,
             time_date_stamp: 0x60000000,
             pointer_to_symbol_table: 0,
             number_of_symbols: 0,
@@ -529,7 +666,7 @@ mod tests {
             image_base: 0x0000000140000000,
         });
 
-        let buffer = create_valid_pe_buffer(0x80, &coff_header, Some(&optional_header));
+        let buffer = create_valid_pe_buffer(0x80, &coff_header, Some(&optional_header), &[]);
         let result = parse(&buffer);
 
         assert_eq!(
@@ -538,6 +675,51 @@ mod tests {
                 e_lfanew: 0x80,
                 coff_header,
                 optional_header,
+                sections: vec![],
+            })
+        );
+    }
+
+    #[test]
+    fn test_parsing_with_sections() {
+        let coff_header = CoffHeader {
+            machine: 0x8664,
+            number_of_sections: 1,
+            time_date_stamp: 0x60000000,
+            pointer_to_symbol_table: 0,
+            number_of_symbols: 0,
+            size_of_optional_header: 0x00F0,
+            characteristics: 0x0022,
+        };
+
+        let optional_header = OptionalHeader::PE32Plus(OptionalHeader64 {
+            common: sample_common(Magic::PE32Plus),
+            image_base: 0x0000000140000000,
+        });
+        let sections = vec![SectionHeader {
+            name: *b".text\0\0\0",
+            virtual_size: 0x1000,
+            virtual_address: 0x1000,
+            size_of_raw_data: 0x1000,
+            pointer_to_raw_data: 0x400,
+            pointer_to_relocations: 0,
+            pointer_to_linenumbers: 0,
+            number_of_relocations: 0,
+            number_of_linenumbers: 0,
+            characteristics: 0x60000020,
+        }];
+
+        let buffer = create_valid_pe_buffer(0x80, &coff_header, Some(&optional_header), &sections);
+
+        let result = parse(&buffer);
+
+        assert_eq!(
+            result,
+            Ok(PeFile {
+                e_lfanew: 0x80,
+                coff_header,
+                optional_header,
+                sections,
             })
         );
     }
@@ -559,7 +741,7 @@ mod tests {
     fn test_invalid_pe_signature() {
         let coff_header = CoffHeader {
             machine: 0x014C,
-            number_of_sections: 3,
+            number_of_sections: 0,
             time_date_stamp: 0,
             pointer_to_symbol_table: 0,
             number_of_symbols: 0,
@@ -567,9 +749,28 @@ mod tests {
             characteristics: 0,
         };
 
-        let mut buffer = create_valid_pe_buffer(0x80, &coff_header, None);
+        let mut buffer = create_valid_pe_buffer(0x80, &coff_header, None, &[]);
         buffer[0x80..0x84].copy_from_slice(b"FAIL");
         assert_eq!(parse(&buffer), Err(PeError::InvalidPeSignature));
+    }
+
+    #[test]
+    fn test_invalid_magic() {
+        let coff_header = CoffHeader {
+            machine: 0x014C,
+            number_of_sections: 0,
+            time_date_stamp: 0,
+            pointer_to_symbol_table: 0,
+            number_of_symbols: 0,
+            size_of_optional_header: 0x00E0,
+            characteristics: 0,
+        };
+
+        let mut buffer = create_valid_pe_buffer(0x80, &coff_header, None, &[]);
+        let opt_start = 0x80 + PE_SIGNATURE_SIZE + COFF_HEADER_SIZE;
+        buffer[opt_start..opt_start + 2].copy_from_slice(&0x9999u16.to_le_bytes());
+
+        assert_eq!(parse(&buffer), Err(PeError::InvalidMagic));
     }
 
     #[test]
