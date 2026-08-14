@@ -1,6 +1,7 @@
 mod binary;
 mod binary_file;
 mod pe;
+mod report;
 
 use std::env;
 
@@ -23,9 +24,9 @@ fn main() {
             if matches!(format, binary::BinaryFormat::Pe) {
                 match pe::parse(&binary_file.data) {
                     Ok(pe_file) => {
-                        println!("PE parsed successfully");
-                        println!("{:#?}", pe_file);
+                        report::print_pe_report(&pe_file);
                     }
+
                     Err(error) => {
                         eprintln!("PE parsing error: {:?}", error);
                     }

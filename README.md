@@ -74,9 +74,9 @@ Current progress:
 * [x] Initial PE signature detection
 * [x] Initial ELF signature detection
 * [x] Unit tests
-* [ ] CLI foundation
-* [ ] Robust file type detection
-* [ ] Architecture detection
+* [x] CLI foundation
+* [x] Robust file type detection
+* [x] Architecture detection
 * [ ] PE parser
 * [ ] ELF parser
 * [ ] Static analysis modules
@@ -97,17 +97,17 @@ Current progress:
 ### Phase 2 — Binary Detection
 
 * [x] Initial binary signature detection
-* [ ] Read binary files from CLI
-* [ ] Robust file format detection
-* [ ] Detect architecture
+* [x] Read binary files from CLI
+* [x] Robust file format detection
+* [x] Detect architecture
 * [ ] Detect endianness
 * [ ] Basic file metadata
 
 ### Phase 3 — PE Analysis
 
-* [ ] DOS Header
-* [ ] PE Signature
-* [ ] COFF Header
+* [x] DOS Header
+* [x] PE Signature
+* [x] COFF Header
 * [ ] Optional Header
 * [ ] Section Table
 * [ ] Imports

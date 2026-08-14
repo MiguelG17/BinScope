@@ -9,7 +9,7 @@ pub enum PeError {
 
 #[derive(Debug, PartialEq)]
 pub struct CoffHeader {
-    pub machine: u16,
+    pub machine: Machine,
     pub number_of_sections: u16,
     pub time_date_stamp: u32,
     pub pointer_to_symbol_table: u32,
@@ -17,6 +17,26 @@ pub struct CoffHeader {
     pub size_of_optional_header: u16,
     pub characteristics: u16,
 }
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum Machine {
+    X86,
+    AMD64,
+    Arm,
+    Arm64,
+    Unknown(u16),
+}
+
+fn interpret_machine(value: u16) -> Machine {
+    match value {
+        0x014C => Machine::X86,
+        0x8664 => Machine::AMD64,
+        0x01C0 => Machine::Arm,
+        0xAA64 => Machine::Arm64,
+        other => Machine::Unknown(other),
+    }
+}
+
 
 #[derive(Debug, PartialEq)]
 pub struct OptionalHeaderCommon {
@@ -75,23 +95,14 @@ pub struct PeFile {
     pub sections: Vec<SectionHeader>,
 }
 
-// impl PeFile {
-//     pub fn rva_to_file_offset(&self, rva: u32) -> Option<u32> {
-//         for section in &self.sections {
-//             let section_start = section.virtual_address;
-//             let section_end = section_start + section.size_of_raw_data;
-
-//             if rva >= section_start && rva < section_end {
-//                 return Some(
-//                     section.pointer_to_raw_data
-//                         + (rva - section.virtual_address),
-//                 );
-//             }
-//         }
-
-//         None
-//     }
-// }
+impl PeFile {
+    pub fn section_names(&self) -> Vec<String> {
+        self.sections
+            .iter()
+            .map(|section| section.name_as_string())
+            .collect()
+    }
+}
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum SectionCharacteristic {
@@ -128,6 +139,17 @@ pub struct SectionHeader {
     pub characteristic_flags: Vec<SectionCharacteristic>,
 }
 
+impl SectionHeader {
+    pub fn name_as_string(&self) -> String {
+        let len = self
+            .name
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(self.name.len());
+
+        String::from_utf8_lossy(&self.name[..len]).to_string()
+    }
+}
 pub fn parse(data: &[u8]) -> Result<PeFile, PeError> {
     if data.len() < 0x40 {
         return Err(PeError::FileTooSmall);
@@ -146,7 +168,8 @@ pub fn parse(data: &[u8]) -> Result<PeFile, PeError> {
 
     let mut current_offset = pe_offset + 4;
 
-    let machine = read_u16(data, &mut current_offset)?;
+    let machine_value = read_u16(data, &mut current_offset)?;
+    let machine = interpret_machine(machine_value);
     let number_of_sections = read_u16(data, &mut current_offset)?;
     let time_date_stamp = read_u32(data, &mut current_offset)?;
     let pointer_to_symbol_table = read_u32(data, &mut current_offset)?;
@@ -438,6 +461,19 @@ mod tests {
 
     const SECTION_HEADER_SIZE: usize = 40;
 
+    impl Machine {
+        fn to_u16(self) -> u16 {
+            match self {
+                Machine::X86 => 0x014C,
+                Machine::AMD64 => 0x8664,
+                Machine::Arm => 0x01C0,
+                Machine::Arm64 => 0xAA64,
+                Machine::Unknown(value) => value,
+            }
+        }
+    }
+
+
     fn serialize_common(curr: &mut usize, buffer: &mut [u8], common: &OptionalHeaderCommon) {
         buffer[*curr..*curr + MAJOR_LINKER_VERSION_SIZE]
             .copy_from_slice(&common.major_linker_version.to_le_bytes());
@@ -558,7 +594,8 @@ mod tests {
         // COFF Header (20 bytes)
         let mut curr = pe_offset + PE_SIGNATURE_SIZE;
 
-        buffer[curr..curr + MACHINE_SIZE].copy_from_slice(&coff_header.machine.to_le_bytes());
+        buffer[curr..curr + MACHINE_SIZE]
+            .copy_from_slice(&coff_header.machine.to_u16().to_le_bytes());
         curr += MACHINE_SIZE;
 
         buffer[curr..curr + NUMBER_OF_SECTIONS_SIZE]
@@ -701,7 +738,7 @@ mod tests {
     #[test]
     fn test_valid_pe32_parsing() {
         let coff_header = CoffHeader {
-            machine: 0x014C,
+            machine: Machine::X86,
             number_of_sections: 0,
             time_date_stamp: 0x60000000,
             pointer_to_symbol_table: 0,
@@ -733,7 +770,7 @@ mod tests {
     #[test]
     fn test_valid_pe32plus_parsing() {
         let coff_header = CoffHeader {
-            machine: 0x8664,
+            machine: Machine::X86,
             number_of_sections: 0,
             time_date_stamp: 0x60000000,
             pointer_to_symbol_table: 0,
@@ -764,7 +801,7 @@ mod tests {
     #[test]
     fn test_parsing_with_sections() {
         let coff_header = CoffHeader {
-            machine: 0x8664,
+            machine: Machine::X86,
             number_of_sections: 1,
             time_date_stamp: 0x60000000,
             pointer_to_symbol_table: 0,
@@ -826,7 +863,7 @@ mod tests {
     #[test]
     fn test_invalid_pe_signature() {
         let coff_header = CoffHeader {
-            machine: 0x014C,
+            machine: Machine::X86,
             number_of_sections: 0,
             time_date_stamp: 0,
             pointer_to_symbol_table: 0,
@@ -843,7 +880,7 @@ mod tests {
     #[test]
     fn test_invalid_magic() {
         let coff_header = CoffHeader {
-            machine: 0x014C,
+            machine: Machine::X86,
             number_of_sections: 0,
             time_date_stamp: 0,
             pointer_to_symbol_table: 0,
@@ -915,13 +952,84 @@ mod tests {
         assert_eq!(parse(&buffer), Err(PeError::InvalidOffset));
     }
 
+    #[test]
+    fn test_section_name_as_string() {
+        let section = SectionHeader {
+            name: *b".text\0\0\0",
+            virtual_size: 0,
+            virtual_address: 0,
+            size_of_raw_data: 0,
+            pointer_to_raw_data: 0,
+            pointer_to_relocations: 0,
+            pointer_to_linenumbers: 0,
+            number_of_relocations: 0,
+            number_of_linenumbers: 0,
+            characteristics: 0,
+            characteristic_flags: vec![],
+        };
+
+        assert_eq!(section.name_as_string(), ".text");
+    }
+
+    #[test]
+    fn test_section_names() {
+        let pe = PeFile {
+            e_lfanew: 0x80,
+            coff_header: CoffHeader {
+                machine: Machine::X86,
+                number_of_sections: 2,
+                time_date_stamp: 0,
+                pointer_to_symbol_table: 0,
+                number_of_symbols: 0,
+                size_of_optional_header: 0xF0,
+                characteristics: 0x22,
+            },
+            optional_header: OptionalHeader::PE32Plus(OptionalHeader64 {
+                common: sample_common(Magic::PE32Plus),
+                image_base: 0x140000000,
+            }),
+            sections: vec![
+                SectionHeader {
+                    name: *b".text\0\0\0",
+                    virtual_size: 0,
+                    virtual_address: 0,
+                    size_of_raw_data: 0,
+                    pointer_to_raw_data: 0,
+                    pointer_to_relocations: 0,
+                    pointer_to_linenumbers: 0,
+                    number_of_relocations: 0,
+                    number_of_linenumbers: 0,
+                    characteristics: 0,
+                    characteristic_flags: vec![],
+                },
+                SectionHeader {
+                    name: *b".rdata\0\0",
+                    virtual_size: 0,
+                    virtual_address: 0,
+                    size_of_raw_data: 0,
+                    pointer_to_raw_data: 0,
+                    pointer_to_relocations: 0,
+                    pointer_to_linenumbers: 0,
+                    number_of_relocations: 0,
+                    number_of_linenumbers: 0,
+                    characteristics: 0,
+                    characteristic_flags: vec![],
+                },
+            ],
+        };
+
+        assert_eq!(
+            pe.section_names(),
+            vec![".text".to_string(), ".rdata".to_string()]
+        );
+    }
     // #[test]
     // fn test_rva_to_file_offset() {
     //     let pe = PeFile {
     //         e_lfanew: 0x80,
 
     //         coff_header: CoffHeader {
-    //             machine: 0x8664,
+    //             machine: Machine::X86,
     //             number_of_sections: 1,
     //             time_date_stamp: 0,
     //             pointer_to_symbol_table: 0,
