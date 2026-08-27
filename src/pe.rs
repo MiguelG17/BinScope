@@ -37,7 +37,6 @@ fn interpret_machine(value: u16) -> Machine {
     }
 }
 
-
 #[derive(Debug, PartialEq)]
 pub struct OptionalHeaderCommon {
     pub magic: Magic,
@@ -66,6 +65,8 @@ pub struct OptionalHeaderCommon {
     pub checksum: u32,
     pub subsystem: u16,
     pub dll_characteristics: u16,
+
+    pub data_directories: DataDirectories,
 }
 
 #[derive(Debug, PartialEq)]
@@ -150,6 +151,87 @@ impl SectionHeader {
         String::from_utf8_lossy(&self.name[..len]).to_string()
     }
 }
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub struct DataDirectory {
+    pub virtual_address: u32,
+    pub size: u32,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct DataDirectories {
+    pub entries: Vec<DataDirectory>,
+}
+
+impl DataDirectories {
+    pub fn get(&self, directory: DataDirectoryType) -> Option<&DataDirectory> {
+        self.entries.get(directory as usize)
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+#[repr(usize)]
+pub enum DataDirectoryType {
+    Export = 0,
+    Import = 1,
+    Resource = 2,
+    Exception = 3,
+    Certificate = 4,
+    BaseRelocation = 5,
+    Debug = 6,
+    Architecture = 7,
+    GlobalPtr = 8,
+    Tls = 9,
+    LoadConfig = 10,
+    BoundImport = 11,
+    ImportAddressTable = 12,
+    DelayImport = 13,
+    ClrRuntime = 14,
+    Reserved = 15,
+}
+
+impl DataDirectoryType {
+    pub const ALL: [DataDirectoryType; 16] = [
+        DataDirectoryType::Export,
+        DataDirectoryType::Import,
+        DataDirectoryType::Resource,
+        DataDirectoryType::Exception,
+        DataDirectoryType::Certificate,
+        DataDirectoryType::BaseRelocation,
+        DataDirectoryType::Debug,
+        DataDirectoryType::Architecture,
+        DataDirectoryType::GlobalPtr,
+        DataDirectoryType::Tls,
+        DataDirectoryType::LoadConfig,
+        DataDirectoryType::BoundImport,
+        DataDirectoryType::ImportAddressTable,
+        DataDirectoryType::DelayImport,
+        DataDirectoryType::ClrRuntime,
+        DataDirectoryType::Reserved,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            DataDirectoryType::Export => "Export",
+            DataDirectoryType::Import => "Import",
+            DataDirectoryType::Resource => "Resource",
+            DataDirectoryType::Exception => "Exception",
+            DataDirectoryType::Certificate => "Certificate",
+            DataDirectoryType::BaseRelocation => "Base Relocation",
+            DataDirectoryType::Debug => "Debug",
+            DataDirectoryType::Architecture => "Architecture",
+            DataDirectoryType::GlobalPtr => "Global Ptr",
+            DataDirectoryType::Tls => "TLS",
+            DataDirectoryType::LoadConfig => "Load Config",
+            DataDirectoryType::BoundImport => "Bound Import",
+            DataDirectoryType::ImportAddressTable => "Import Address Table",
+            DataDirectoryType::DelayImport => "Delay Import",
+            DataDirectoryType::ClrRuntime => "CLR Runtime",
+            DataDirectoryType::Reserved => "Reserved",
+        }
+    }
+}
+
 pub fn parse(data: &[u8]) -> Result<PeFile, PeError> {
     if data.len() < 0x40 {
         return Err(PeError::FileTooSmall);
@@ -224,6 +306,34 @@ pub fn parse(data: &[u8]) -> Result<PeFile, PeError> {
     let subsystem = read_u16(optional_header_data, &mut optional_offset)?;
     let dll_characteristics = read_u16(optional_header_data, &mut optional_offset)?;
 
+    let number_of_rva_and_sizes = match magic {
+        Magic::PE32 => {
+            let _size_of_stack_reserve = read_u32(optional_header_data, &mut optional_offset)?;
+            let _size_of_stack_commit = read_u32(optional_header_data, &mut optional_offset)?;
+            let _size_of_heap_reserve = read_u32(optional_header_data, &mut optional_offset)?;
+            let _size_of_heap_commit = read_u32(optional_header_data, &mut optional_offset)?;
+            let _loader_flags = read_u32(optional_header_data, &mut optional_offset)?;
+
+            read_u32(optional_header_data, &mut optional_offset)?
+        }
+
+        Magic::PE32Plus => {
+            let _size_of_stack_reserve = read_u64(optional_header_data, &mut optional_offset)?;
+            let _size_of_stack_commit = read_u64(optional_header_data, &mut optional_offset)?;
+            let _size_of_heap_reserve = read_u64(optional_header_data, &mut optional_offset)?;
+            let _size_of_heap_commit = read_u64(optional_header_data, &mut optional_offset)?;
+            let _loader_flags = read_u32(optional_header_data, &mut optional_offset)?;
+
+            read_u32(optional_header_data, &mut optional_offset)?
+        }
+    };
+
+    let data_directories = parse_data_directories(
+        optional_header_data,
+        &mut optional_offset,
+        number_of_rva_and_sizes,
+    )?;
+
     let optional_header = match magic {
         Magic::PE32 => OptionalHeader::PE32(OptionalHeader32 {
             common: OptionalHeaderCommon {
@@ -249,6 +359,7 @@ pub fn parse(data: &[u8]) -> Result<PeFile, PeError> {
                 checksum,
                 subsystem,
                 dll_characteristics,
+                data_directories,
             },
             base_of_data: base_of_data.unwrap(),
             image_base: image_base_32.unwrap(),
@@ -278,6 +389,7 @@ pub fn parse(data: &[u8]) -> Result<PeFile, PeError> {
                 checksum,
                 subsystem,
                 dll_characteristics,
+                data_directories,
             },
             image_base: image_base_64.unwrap(),
         }),
@@ -305,6 +417,33 @@ pub fn parse(data: &[u8]) -> Result<PeFile, PeError> {
         optional_header,
         sections,
     })
+}
+
+
+fn parse_data_directories(
+    data: &[u8],
+    offset: &mut usize,
+    count: u32,
+) -> Result<DataDirectories, PeError> {
+    let mut entries = Vec::with_capacity(16);
+
+    let to_read = count.min(16);
+
+    for _ in 0..to_read {
+        entries.push(DataDirectory {
+            virtual_address: read_u32(data, offset)?,
+            size: read_u32(data, offset)?,
+        });
+    }
+
+    while entries.len() < 16 {
+        entries.push(DataDirectory {
+            virtual_address: 0,
+            size: 0,
+        });
+    }
+
+    Ok(DataDirectories { entries })
 }
 
 fn parse_section_header(data: &[u8], offset: &mut usize) -> Result<SectionHeader, PeError> {
@@ -473,7 +612,6 @@ mod tests {
         }
     }
 
-
     fn serialize_common(curr: &mut usize, buffer: &mut [u8], common: &OptionalHeaderCommon) {
         buffer[*curr..*curr + MAJOR_LINKER_VERSION_SIZE]
             .copy_from_slice(&common.major_linker_version.to_le_bytes());
@@ -640,6 +778,21 @@ mod tests {
                     curr += IMAGE_BASE_32_SIZE;
 
                     serialize_trailing_common(&mut curr, &mut buffer, &pe32.common);
+
+                    buffer[curr..curr + 4].copy_from_slice(&0u32.to_le_bytes());
+                    curr += 4;
+                    // repetir cuatro veces
+
+                    buffer[curr..curr + 4].copy_from_slice(&0u32.to_le_bytes());
+                    curr += 4; // LoaderFlags
+
+                    buffer[curr..curr + 4].copy_from_slice(&16u32.to_le_bytes());
+                    curr += 4; // NumberOfRvaAndSizes
+
+                    for _ in 0..16 {
+                        buffer[curr..curr + 8].fill(0);
+                        curr += 8;
+}
                 }
                 OptionalHeader::PE32Plus(pe64) => {
                     let magic_val: u16 = 0x20B;
@@ -653,6 +806,35 @@ mod tests {
                     curr += IMAGE_BASE_64_SIZE;
 
                     serialize_trailing_common(&mut curr, &mut buffer, &pe64.common);
+
+                    // SizeOfStackReserve (8 bytes)
+                    buffer[curr..curr + 8].copy_from_slice(&0u64.to_le_bytes());
+                    curr += 8;
+
+                    // SizeOfStackCommit (8 bytes)
+                    buffer[curr..curr + 8].copy_from_slice(&0u64.to_le_bytes());
+                    curr += 8;
+
+                    // SizeOfHeapReserve (8 bytes)
+                    buffer[curr..curr + 8].copy_from_slice(&0u64.to_le_bytes());
+                    curr += 8;
+
+                    // SizeOfHeapCommit (8 bytes)
+                    buffer[curr..curr + 8].copy_from_slice(&0u64.to_le_bytes());
+                    curr += 8;
+
+                    // LoaderFlags (u32 - 4 bytes)
+                    buffer[curr..curr + 4].copy_from_slice(&0u32.to_le_bytes());
+                    curr += 4; 
+
+                    // NumberOfRvaAndSizes (u32 - 4 bytes)
+                    buffer[curr..curr + 4].copy_from_slice(&16u32.to_le_bytes());
+                    curr += 4; 
+
+                    for _ in 0..16 {
+                        buffer[curr..curr + 8].fill(0);
+                        curr += 8;
+                    }
                 }
             }
         }
@@ -732,6 +914,15 @@ mod tests {
             checksum: 0,
             subsystem: 3,
             dll_characteristics: 0x8140,
+            data_directories: DataDirectories {
+                entries: vec![
+                    DataDirectory {
+                        virtual_address: 0,
+                        size: 0,
+                    };
+                    16
+                ],
+            },
         }
     }
 
@@ -1023,6 +1214,31 @@ mod tests {
             vec![".text".to_string(), ".rdata".to_string()]
         );
     }
+
+
+
+    #[test]
+    fn test_empty_data_directories() {
+        let dirs = DataDirectories {
+            entries: vec![
+                DataDirectory {
+                    virtual_address: 0,
+                    size: 0,
+                };
+                16
+            ],
+        };
+
+        assert_eq!(dirs.entries.len(), 16);
+
+        assert_eq!(
+            dirs.get(DataDirectoryType::Import),
+            Some(&DataDirectory {
+                virtual_address: 0,
+                size: 0,
+            })
+        );
+    }
     // #[test]
     // fn test_rva_to_file_offset() {
     //     let pe = PeFile {
@@ -1069,4 +1285,30 @@ mod tests {
     //         Some(0x634)
     //     );
     // }
+
+    #[test]
+    fn test_get_import_directory() {
+        let mut entries = vec![
+            DataDirectory {
+                virtual_address: 0,
+                size: 0,
+            };
+            16
+        ];
+
+        entries[DataDirectoryType::Import as usize] = DataDirectory {
+            virtual_address: 0x3000,
+            size: 0x120,
+        };
+
+        let directories = DataDirectories { entries };
+
+        assert_eq!(
+            directories.get(DataDirectoryType::Import),
+            Some(&DataDirectory {
+                virtual_address: 0x3000,
+                size: 0x120,
+            })
+        );
+    }
 }

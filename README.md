@@ -108,8 +108,8 @@ Current progress:
 * [x] DOS Header
 * [x] PE Signature
 * [x] COFF Header
-* [ ] Optional Header
-* [ ] Section Table
+* [x] Optional Header
+* [x] Section Table
 * [ ] Imports
 * [ ] Exports
 
