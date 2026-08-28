@@ -103,6 +103,77 @@ impl PeFile {
             .map(|section| section.name_as_string())
             .collect()
     }
+
+    pub fn rva_to_file_offset(&self, rva: u32) -> Option<u32> {
+        for section in &self.sections {
+            let start = section.virtual_address;
+            let end = start + section.size_of_raw_data;
+
+            if rva >= start && rva < end {
+                return Some(section.pointer_to_raw_data + (rva - section.virtual_address));
+            }
+        }
+
+        None
+    }
+
+    pub fn imported_dlls(&self, data: &[u8]) -> Result<Vec<ImportModule>, PeError> {
+        let directories = match &self.optional_header {
+            OptionalHeader::PE32(header) => &header.common.data_directories,
+            OptionalHeader::PE32Plus(header) => &header.common.data_directories,
+        };
+
+        let import_directory = match directories.get(DataDirectoryType::Import) {
+            Some(dir) if dir.virtual_address != 0 => dir,
+            _ => return Ok(Vec::new()),
+        };
+
+        let mut offset = self
+            .rva_to_file_offset(import_directory.virtual_address)
+            .ok_or(PeError::InvalidOffset)? as usize;
+
+        let mut dlls = Vec::new();
+
+        loop {
+            let descriptor = parse_import_descriptor(data, &mut offset)?;
+
+            if descriptor.original_first_thunk == 0
+                && descriptor.time_date_stamp == 0
+                && descriptor.forwarder_chain == 0
+                && descriptor.name_rva == 0
+                && descriptor.first_thunk == 0
+            {
+                break;
+            }
+
+            let name_offset = self
+                .rva_to_file_offset(descriptor.name_rva)
+                .ok_or(PeError::InvalidOffset)? as usize;
+
+            let dll_name = read_c_string(data, name_offset)?;
+
+            let thunk_rva = if descriptor.original_first_thunk != 0 {
+                descriptor.original_first_thunk
+            } else {
+                descriptor.first_thunk
+            };
+
+            let functions = parse_import_lookup_table(self, data, thunk_rva)?;
+
+            dlls.push(ImportModule {
+                dll_name,
+                functions,
+            });
+        }
+
+        Ok(dlls)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct ImportByName {
+    pub hint: u16,
+    pub name: String,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -230,6 +301,21 @@ impl DataDirectoryType {
             DataDirectoryType::Reserved => "Reserved",
         }
     }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct ImportDescriptor {
+    pub original_first_thunk: u32,
+    pub time_date_stamp: u32,
+    pub forwarder_chain: u32,
+    pub name_rva: u32,
+    pub first_thunk: u32,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct ImportModule {
+    pub dll_name: String,
+    pub functions: Vec<String>,
 }
 
 pub fn parse(data: &[u8]) -> Result<PeFile, PeError> {
@@ -419,7 +505,6 @@ pub fn parse(data: &[u8]) -> Result<PeFile, PeError> {
     })
 }
 
-
 fn parse_data_directories(
     data: &[u8],
     offset: &mut usize,
@@ -444,6 +529,40 @@ fn parse_data_directories(
     }
 
     Ok(DataDirectories { entries })
+}
+
+fn parse_import_lookup_table(
+    pe: &PeFile,
+    data: &[u8],
+    thunk_rva: u32,
+) -> Result<Vec<String>, PeError> {
+    let mut functions = Vec::new();
+
+    let mut offset = pe
+        .rva_to_file_offset(thunk_rva)
+        .ok_or(PeError::InvalidOffset)? as usize;
+
+    loop {
+        let thunk = read_u64(data, &mut offset)?;
+
+        if thunk == 0 {
+            break;
+        }
+
+        if thunk & 0x8000_0000_0000_0000 != 0 {
+            continue;
+        }
+
+        let name_offset = pe
+            .rva_to_file_offset(thunk as u32)
+            .ok_or(PeError::InvalidOffset)? as usize;
+
+        let import = parse_import_by_name(data, name_offset)?;
+
+        functions.push(import.name);
+    }
+
+    Ok(functions)
 }
 
 fn parse_section_header(data: &[u8], offset: &mut usize) -> Result<SectionHeader, PeError> {
@@ -476,6 +595,39 @@ fn parse_section_header(data: &[u8], offset: &mut usize) -> Result<SectionHeader
         characteristics,
         characteristic_flags,
     })
+}
+
+fn parse_import_descriptor(data: &[u8], offset: &mut usize) -> Result<ImportDescriptor, PeError> {
+    Ok(ImportDescriptor {
+        original_first_thunk: read_u32(data, offset)?,
+        time_date_stamp: read_u32(data, offset)?,
+        forwarder_chain: read_u32(data, offset)?,
+        name_rva: read_u32(data, offset)?,
+        first_thunk: read_u32(data, offset)?,
+    })
+}
+
+fn read_c_string(data: &[u8], offset: usize) -> Result<String, PeError> {
+    let mut end = offset;
+
+    while end < data.len() && data[end] != 0 {
+        end += 1;
+    }
+
+    if end >= data.len() {
+        return Err(PeError::InvalidOffset);
+    }
+
+    Ok(String::from_utf8_lossy(&data[offset..end]).to_string())
+}
+
+fn parse_import_by_name(data: &[u8], offset: usize) -> Result<ImportByName, PeError> {
+    let mut current = offset;
+
+    let hint = read_u16(data, &mut current)?;
+    let name = read_c_string(data, current)?;
+
+    Ok(ImportByName { hint, name })
 }
 
 fn parse_section_characteristics(value: u32) -> Vec<SectionCharacteristic> {
@@ -792,7 +944,7 @@ mod tests {
                     for _ in 0..16 {
                         buffer[curr..curr + 8].fill(0);
                         curr += 8;
-}
+                    }
                 }
                 OptionalHeader::PE32Plus(pe64) => {
                     let magic_val: u16 = 0x20B;
@@ -825,11 +977,11 @@ mod tests {
 
                     // LoaderFlags (u32 - 4 bytes)
                     buffer[curr..curr + 4].copy_from_slice(&0u32.to_le_bytes());
-                    curr += 4; 
+                    curr += 4;
 
                     // NumberOfRvaAndSizes (u32 - 4 bytes)
                     buffer[curr..curr + 4].copy_from_slice(&16u32.to_le_bytes());
-                    curr += 4; 
+                    curr += 4;
 
                     for _ in 0..16 {
                         buffer[curr..curr + 8].fill(0);
@@ -1215,8 +1367,6 @@ mod tests {
         );
     }
 
-
-
     #[test]
     fn test_empty_data_directories() {
         let dirs = DataDirectories {
@@ -1239,52 +1389,47 @@ mod tests {
             })
         );
     }
-    // #[test]
-    // fn test_rva_to_file_offset() {
-    //     let pe = PeFile {
-    //         e_lfanew: 0x80,
+    #[test]
+    fn test_rva_to_file_offset() {
+        let pe = PeFile {
+            e_lfanew: 0x80,
 
-    //         coff_header: CoffHeader {
-    //             machine: Machine::X86,
-    //             number_of_sections: 1,
-    //             time_date_stamp: 0,
-    //             pointer_to_symbol_table: 0,
-    //             number_of_symbols: 0,
-    //             size_of_optional_header: 0xF0,
-    //             characteristics: 0x22,
-    //         },
+            coff_header: CoffHeader {
+                machine: Machine::X86,
+                number_of_sections: 1,
+                time_date_stamp: 0,
+                pointer_to_symbol_table: 0,
+                number_of_symbols: 0,
+                size_of_optional_header: 0xF0,
+                characteristics: 0x22,
+            },
 
-    //         optional_header: OptionalHeader::PE32Plus(OptionalHeader64 {
-    //             common: sample_common(Magic::PE32Plus),
-    //             image_base: 0x140000000,
-    //         }),
+            optional_header: OptionalHeader::PE32Plus(OptionalHeader64 {
+                common: sample_common(Magic::PE32Plus),
+                image_base: 0x140000000,
+            }),
 
-    //         sections: vec![
-    //             SectionHeader {
-    //                 name: *b".text\0\0\0",
-    //                 virtual_size: 0x1000,
-    //                 virtual_address: 0x1000,
-    //                 size_of_raw_data: 0x1000,
-    //                 pointer_to_raw_data: 0x400,
-    //                 pointer_to_relocations: 0,
-    //                 pointer_to_linenumbers: 0,
-    //                 number_of_relocations: 0,
-    //                 number_of_linenumbers: 0,
-    //                 characteristics: 0x60000020,
-    //                 characteristic_flags: vec![
-    //                     SectionCharacteristic::Code,
-    //                     SectionCharacteristic::Executable,
-    //                     SectionCharacteristic::Readable,
-    //                 ],
-    //             }
-    //         ],
-    //     };
+            sections: vec![SectionHeader {
+                name: *b".text\0\0\0",
+                virtual_size: 0x1000,
+                virtual_address: 0x1000,
+                size_of_raw_data: 0x1000,
+                pointer_to_raw_data: 0x400,
+                pointer_to_relocations: 0,
+                pointer_to_linenumbers: 0,
+                number_of_relocations: 0,
+                number_of_linenumbers: 0,
+                characteristics: 0x60000020,
+                characteristic_flags: vec![
+                    SectionCharacteristic::Code,
+                    SectionCharacteristic::Executable,
+                    SectionCharacteristic::Readable,
+                ],
+            }],
+        };
 
-    //     assert_eq!(
-    //         pe.rva_to_file_offset(0x1234),
-    //         Some(0x634)
-    //     );
-    // }
+        assert_eq!(pe.rva_to_file_offset(0x1234), Some(0x634));
+    }
 
     #[test]
     fn test_get_import_directory() {
@@ -1310,5 +1455,25 @@ mod tests {
                 size: 0x120,
             })
         );
+    }
+
+    #[test]
+    fn test_read_c_string() {
+        let data = b"KERNEL32.dll\0extra";
+
+        assert_eq!(read_c_string(data, 0), Ok("KERNEL32.dll".to_string()));
+    }
+
+    #[test]
+    fn test_parse_import_by_name() {
+        let data = [
+            0x34, 0x12, b'L', b'o', b'a', b'd', b'L', b'i', b'b', b'r', b'a', b'r', b'y', b'W',
+            0x00,
+        ];
+
+        let import = parse_import_by_name(&data, 0).unwrap();
+
+        assert_eq!(import.hint, 0x1234);
+        assert_eq!(import.name, "LoadLibraryW");
     }
 }

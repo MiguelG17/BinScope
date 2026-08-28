@@ -24,7 +24,7 @@ fn main() {
             if matches!(format, binary::BinaryFormat::Pe) {
                 match pe::parse(&binary_file.data) {
                     Ok(pe_file) => {
-                        report::print_pe_report(&pe_file);
+                        report::print_pe_report(&pe_file, &binary_file.data);
                     }
 
                     Err(error) => {
