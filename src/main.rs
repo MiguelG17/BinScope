@@ -1,3 +1,4 @@
+mod analysis;
 mod binary;
 mod binary_file;
 mod pe;

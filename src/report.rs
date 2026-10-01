@@ -1,4 +1,6 @@
+use crate::analysis::detector::analyze_pe;
 use crate::pe::{DataDirectories, DataDirectoryType, OptionalHeader, PeFile};
+
 fn print_optional_header(pe: &PeFile) {
     match &pe.optional_header {
         OptionalHeader::PE32(header) => {
@@ -47,18 +49,71 @@ pub fn print_pe_report(pe: &PeFile, data: &[u8]) {
     println!("-------");
 
     match pe.imported_dlls(data) {
-        Ok(dlls) => {
-            for module in dlls {
-                println!("  {}", module.dll_name);
+        Ok(modules) => {
+            println!();
+            println!("Imports");
+            println!("-------");
 
-                for function in module.functions {
+            for module in &modules {
+                println!("  {}", module.name);
+
+                for function in &module.functions {
                     println!("      {}", function);
                 }
 
                 println!();
             }
+
+            let analysis = analyze_pe(pe, &modules, data);
+
+            println!("Behavior Analysis");
+            println!("-----------------");
+
+            println!(
+                "Risk Score: {}/100 ({})",
+                analysis.score,
+                analysis.risk_level()
+            );
+
+            println!();
+
+            if analysis.findings.is_empty() {
+                println!("No suspicious behavior detected.");
+            } else {
+                for finding in analysis.findings {
+                    println!(
+                        "[{:?}] {} ({}/{}) (+{})",
+                        finding.severity,
+                        finding.name,
+                        finding.evidence.len(),
+                        finding.evidence.len() + finding.missing.len(),
+                        finding.score
+                    );
+
+                    if !finding.evidence.is_empty() {
+                        println!("Evidence: ");
+                        println!();
+                        for api in finding.evidence {
+                            println!("    {}", api);
+                        }
+                    }
+
+                    if !finding.missing.is_empty() {
+                        println!("Missing: ");
+                        println!();
+                        for api in finding.missing {
+                            println!("    {}", api);
+                        }
+                    }
+
+                    println!();
+                }
+            }
         }
-        Err(_) => println!("Unable to read imports."),
+
+        Err(_) => {
+            println!("Unable to read imports.");
+        }
     }
 }
 

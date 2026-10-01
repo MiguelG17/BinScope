@@ -96,6 +96,12 @@ pub struct PeFile {
     pub sections: Vec<SectionHeader>,
 }
 
+#[derive(Debug, PartialEq)]
+pub struct ImportModule {
+    pub name: String,
+    pub functions: Vec<String>,
+}
+
 impl PeFile {
     pub fn section_names(&self) -> Vec<String> {
         self.sections
@@ -132,7 +138,7 @@ impl PeFile {
             .rva_to_file_offset(import_directory.virtual_address)
             .ok_or(PeError::InvalidOffset)? as usize;
 
-        let mut dlls = Vec::new();
+        let mut modules = Vec::new();
 
         loop {
             let descriptor = parse_import_descriptor(data, &mut offset)?;
@@ -160,13 +166,13 @@ impl PeFile {
 
             let functions = parse_import_lookup_table(self, data, thunk_rva)?;
 
-            dlls.push(ImportModule {
-                dll_name,
+            modules.push(ImportModule {
+                name: dll_name,
                 functions,
             });
         }
 
-        Ok(dlls)
+        Ok(modules)
     }
 }
 
@@ -310,12 +316,6 @@ pub struct ImportDescriptor {
     pub forwarder_chain: u32,
     pub name_rva: u32,
     pub first_thunk: u32,
-}
-
-#[derive(Debug, PartialEq)]
-pub struct ImportModule {
-    pub dll_name: String,
-    pub functions: Vec<String>,
 }
 
 pub fn parse(data: &[u8]) -> Result<PeFile, PeError> {
@@ -715,7 +715,7 @@ fn read_u8(data: &[u8], offset: &mut usize) -> Result<u8, PeError> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     const PE_SIGNATURE_SIZE: usize = 4;
@@ -1042,7 +1042,7 @@ mod tests {
         buffer
     }
 
-    fn sample_common(magic: Magic) -> OptionalHeaderCommon {
+    pub fn sample_common(magic: Magic) -> OptionalHeaderCommon {
         OptionalHeaderCommon {
             magic,
             major_linker_version: 14,
