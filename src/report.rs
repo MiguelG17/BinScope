@@ -63,55 +63,49 @@ pub fn print_pe_report(pe: &PeFile, data: &[u8]) {
 
                 println!();
             }
+            let analysis = analyze(pe, data);
 
-            match analyze(pe, data) {
-                Ok(analysis) => {
-                    println!("Behavior Analysis");
-                    println!("-----------------");
+            println!("Behavior Analysis");
+            println!("-----------------");
 
+            println!(
+                "Risk Score: {}/100 ({})",
+                analysis.score,
+                analysis.risk_level()
+            );
+
+            println!();
+
+            if analysis.findings.is_empty() {
+                println!("No suspicious behavior detected.");
+            } else {
+                for finding in analysis.findings {
                     println!(
-                        "Risk Score: {}/100 ({})",
-                        analysis.score,
-                        analysis.risk_level()
+                        "[{:?}] {} ({}/{}) (+{})",
+                        finding.severity,
+                        finding.name,
+                        finding.evidence.len(),
+                        finding.evidence.len() + finding.missing.len(),
+                        finding.score
                     );
 
-                    println!();
-
-                    if analysis.findings.is_empty() {
-                        println!("No suspicious behavior detected.");
-                    } else {
-                        for finding in analysis.findings {
-                            println!(
-                                "[{:?}] {} ({}/{}) (+{})",
-                                finding.severity,
-                                finding.name,
-                                finding.evidence.len(),
-                                finding.evidence.len() + finding.missing.len(),
-                                finding.score
-                            );
-
-                            if !finding.evidence.is_empty() {
-                                println!("Evidence: ");
-                                println!();
-                                for api in finding.evidence {
-                                    println!("    {}", api);
-                                }
-                            }
-
-                            if !finding.missing.is_empty() {
-                                println!("Missing: ");
-                                println!();
-                                for api in finding.missing {
-                                    println!("    {}", api);
-                                }
-                            }
-
-                            println!();
+                    if !finding.evidence.is_empty() {
+                        println!("Evidence: ");
+                        println!();
+                        for api in finding.evidence {
+                            println!("    {}", api);
                         }
                     }
-                }
-                Err(error) => {
-                    println!("Error parsing: {:?}", error);
+
+                    if !finding.missing.is_empty() {
+                        println!("Missing: ");
+                        println!();
+                        for api in finding.missing {
+                            println!("    {}", api);
+                        }
+                    }
+
+                    println!();
                 }
             }
         }
