@@ -1,3 +1,4 @@
+pub mod analyzer;
 pub mod detector;
 pub mod entropy;
 pub mod findings;

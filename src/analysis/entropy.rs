@@ -1,3 +1,4 @@
+use crate::analysis::findings::AnalysisResult;
 use crate::analysis::findings::{Finding, Severity};
 use crate::pe::PeFile;
 
@@ -27,7 +28,7 @@ pub fn calculate_entropy(bytes: &[u8]) -> f64 {
     entropy
 }
 
-pub fn analyze_entropy(pe: &PeFile, data: &[u8]) -> Vec<Finding> {
+pub fn analyze_entropy(pe: &PeFile, data: &[u8]) -> AnalysisResult {
     let mut findings = Vec::new();
 
     for section in &pe.sections {
@@ -55,7 +56,11 @@ pub fn analyze_entropy(pe: &PeFile, data: &[u8]) -> Vec<Finding> {
         }
     }
 
-    findings
+    let total_score: u8 = findings.iter().map(|f| f.score).sum::<u8>();
+    AnalysisResult {
+        score: total_score,
+        findings,
+    }
 }
 
 #[cfg(test)]

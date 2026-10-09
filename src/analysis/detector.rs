@@ -1,4 +1,3 @@
-use crate::analysis::entropy::analyze_entropy;
 use crate::pe::ImportModule;
 use std::collections::HashSet;
 
@@ -8,20 +7,6 @@ use super::{
 };
 use crate::pe::{PeFile, SectionCharacteristic};
 
-pub fn analyze_pe(pe: &PeFile, modules: &[ImportModule], data: &[u8]) -> AnalysisResult {
-    let mut findings = analyze_imports(modules).findings;
-
-    findings.extend(analyze_sections(pe));
-    findings.extend(analyze_entropy(pe, data));
-
-    let score = findings
-        .iter()
-        .map(|finding| finding.score)
-        .sum::<u8>()
-        .min(100);
-
-    AnalysisResult { score, findings }
-}
 pub fn analyze_imports(modules: &[ImportModule]) -> AnalysisResult {
     let imported: HashSet<&str> = modules
         .iter()
@@ -62,7 +47,7 @@ pub fn analyze_imports(modules: &[ImportModule]) -> AnalysisResult {
     AnalysisResult { score, findings }
 }
 
-fn analyze_sections(pe: &PeFile) -> Vec<Finding> {
+pub fn analyze_sections(pe: &PeFile) -> AnalysisResult {
     let mut findings = Vec::new();
 
     for section in &pe.sections {
@@ -84,8 +69,11 @@ fn analyze_sections(pe: &PeFile) -> Vec<Finding> {
             });
         }
     }
-
-    findings
+    let total_score: u8 = findings.iter().map(|f| f.score).sum::<u8>();
+    AnalysisResult {
+        score: total_score,
+        findings,
+    }
 }
 
 #[cfg(test)]
@@ -123,10 +111,7 @@ mod tests {
 
         assert_eq!(analysis.score, 26);
         assert_eq!(analysis.findings.len(), 1);
-        assert_eq!(
-            !analysis.findings[0].evidence[0].contains("VirtualAlloc"),
-            true
-        );
+        assert!(!analysis.findings[0].evidence[0].contains("VirtualAlloc"));
         assert_eq!(analysis.findings[0].missing.len(), 1);
         assert_eq!(analysis.findings[0].evidence.len(), 2);
         assert_eq!(analysis.findings[0].name, "Process Injection");
@@ -215,9 +200,7 @@ mod tests {
             }],
         };
 
-        let modules = vec![];
-
-        let analysis = analyze_pe(&pe, &modules, &[]);
+        let analysis = analyze_sections(&pe);
 
         assert_eq!(analysis.findings.len(), 1);
         assert_eq!(analysis.findings[0].name, "RWX Section");

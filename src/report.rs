@@ -1,4 +1,4 @@
-use crate::analysis::detector::analyze_pe;
+use crate::analysis::analyzer::analyze;
 use crate::pe::{DataDirectories, DataDirectoryType, OptionalHeader, PeFile};
 
 fn print_optional_header(pe: &PeFile) {
@@ -64,49 +64,54 @@ pub fn print_pe_report(pe: &PeFile, data: &[u8]) {
                 println!();
             }
 
-            let analysis = analyze_pe(pe, &modules, data);
+            match analyze(pe, data) {
+                Ok(analysis) => {
+                    println!("Behavior Analysis");
+                    println!("-----------------");
 
-            println!("Behavior Analysis");
-            println!("-----------------");
-
-            println!(
-                "Risk Score: {}/100 ({})",
-                analysis.score,
-                analysis.risk_level()
-            );
-
-            println!();
-
-            if analysis.findings.is_empty() {
-                println!("No suspicious behavior detected.");
-            } else {
-                for finding in analysis.findings {
                     println!(
-                        "[{:?}] {} ({}/{}) (+{})",
-                        finding.severity,
-                        finding.name,
-                        finding.evidence.len(),
-                        finding.evidence.len() + finding.missing.len(),
-                        finding.score
+                        "Risk Score: {}/100 ({})",
+                        analysis.score,
+                        analysis.risk_level()
                     );
 
-                    if !finding.evidence.is_empty() {
-                        println!("Evidence: ");
-                        println!();
-                        for api in finding.evidence {
-                            println!("    {}", api);
-                        }
-                    }
-
-                    if !finding.missing.is_empty() {
-                        println!("Missing: ");
-                        println!();
-                        for api in finding.missing {
-                            println!("    {}", api);
-                        }
-                    }
-
                     println!();
+
+                    if analysis.findings.is_empty() {
+                        println!("No suspicious behavior detected.");
+                    } else {
+                        for finding in analysis.findings {
+                            println!(
+                                "[{:?}] {} ({}/{}) (+{})",
+                                finding.severity,
+                                finding.name,
+                                finding.evidence.len(),
+                                finding.evidence.len() + finding.missing.len(),
+                                finding.score
+                            );
+
+                            if !finding.evidence.is_empty() {
+                                println!("Evidence: ");
+                                println!();
+                                for api in finding.evidence {
+                                    println!("    {}", api);
+                                }
+                            }
+
+                            if !finding.missing.is_empty() {
+                                println!("Missing: ");
+                                println!();
+                                for api in finding.missing {
+                                    println!("    {}", api);
+                                }
+                            }
+
+                            println!();
+                        }
+                    }
+                }
+                Err(error) => {
+                    println!("Error parsing: {:?}", error);
                 }
             }
         }
