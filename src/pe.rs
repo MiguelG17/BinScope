@@ -65,6 +65,7 @@ pub struct OptionalHeaderCommon {
     pub checksum: u32,
     pub subsystem: u16,
     pub dll_characteristics: u16,
+    pub dll_characteristic_flags: Vec<DllCharacteristic>,
 
     pub data_directories: DataDirectories,
 }
@@ -194,6 +195,14 @@ pub enum SectionCharacteristic {
     Executable,
     Readable,
     Writable,
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum DllCharacteristic {
+    DynamicBase,
+    NxCompat,
+    HighEntropyVA,
+    GuardCF,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -391,6 +400,7 @@ pub fn parse(data: &[u8]) -> Result<PeFile, PeError> {
     let checksum = read_u32(optional_header_data, &mut optional_offset)?;
     let subsystem = read_u16(optional_header_data, &mut optional_offset)?;
     let dll_characteristics = read_u16(optional_header_data, &mut optional_offset)?;
+    let dll_characteristic_flags = parse_dll_characteristics(dll_characteristics);
 
     let number_of_rva_and_sizes = match magic {
         Magic::PE32 => {
@@ -445,6 +455,7 @@ pub fn parse(data: &[u8]) -> Result<PeFile, PeError> {
                 checksum,
                 subsystem,
                 dll_characteristics,
+                dll_characteristic_flags: dll_characteristic_flags.clone(),
                 data_directories,
             },
             base_of_data: base_of_data.unwrap(),
@@ -475,6 +486,7 @@ pub fn parse(data: &[u8]) -> Result<PeFile, PeError> {
                 checksum,
                 subsystem,
                 dll_characteristics,
+                dll_characteristic_flags: dll_characteristic_flags.clone(),
                 data_directories,
             },
             image_base: image_base_64.unwrap(),
@@ -628,6 +640,26 @@ fn parse_import_by_name(data: &[u8], offset: usize) -> Result<ImportByName, PeEr
     let name = read_c_string(data, current)?;
 
     Ok(ImportByName { hint, name })
+}
+
+fn parse_dll_characteristics(value: u16) -> Vec<DllCharacteristic> {
+    let mut flags = Vec::new();
+    if value & 0x0020 != 0 {
+        flags.push(DllCharacteristic::HighEntropyVA);
+    }
+
+    if value & 0x0040 != 0 {
+        flags.push(DllCharacteristic::DynamicBase);
+    }
+
+    if value & 0x0100 != 0 {
+        flags.push(DllCharacteristic::NxCompat);
+    }
+
+    if value & 0x4000 != 0 {
+        flags.push(DllCharacteristic::GuardCF);
+    }
+    flags
 }
 
 fn parse_section_characteristics(value: u32) -> Vec<SectionCharacteristic> {
@@ -1066,6 +1098,7 @@ pub mod tests {
             checksum: 0,
             subsystem: 3,
             dll_characteristics: 0x8140,
+            dll_characteristic_flags: parse_dll_characteristics(0x8140),
             data_directories: DataDirectories {
                 entries: vec![
                     DataDirectory {
