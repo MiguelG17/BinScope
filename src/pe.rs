@@ -205,6 +205,16 @@ pub enum DllCharacteristic {
     GuardCF,
 }
 
+impl DllCharacteristic {
+    pub fn name(self) -> &'static str {
+        match self {
+            DllCharacteristic::DynamicBase => "ASLR (Dynamic Base)",
+            DllCharacteristic::NxCompat => "DEP / NX (Data Execution Prevention)",
+            DllCharacteristic::HighEntropyVA => "High Entropy VA (64-bit ASLR)",
+            DllCharacteristic::GuardCF => "Control Flow Guard (CFG)",
+        }
+    }
+}
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Magic {
     PE32,

@@ -1,5 +1,5 @@
 use crate::analysis::analyzer::analyze;
-use crate::pe::{DataDirectories, DataDirectoryType, OptionalHeader, PeFile};
+use crate::pe::{DataDirectories, DataDirectoryType, DllCharacteristic, OptionalHeader, PeFile};
 
 fn print_optional_header(pe: &PeFile) {
     match &pe.optional_header {
@@ -12,6 +12,7 @@ fn print_optional_header(pe: &PeFile) {
             );
 
             print_data_directories(&header.common.data_directories);
+            print_mitigations(&header.common.dll_characteristic_flags);
         }
 
         OptionalHeader::PE32Plus(header) => {
@@ -23,6 +24,20 @@ fn print_optional_header(pe: &PeFile) {
             );
 
             print_data_directories(&header.common.data_directories);
+            print_mitigations(&header.common.dll_characteristic_flags);
+        }
+    }
+}
+
+fn print_mitigations(flags: &[DllCharacteristic]) {
+    println!("Mitigations");
+    println!("-----------");
+
+    if flags.is_empty() {
+        println!("No security mitigations detected.");
+    } else {
+        for flag in flags {
+            println!("  - {}", flag.name());
         }
     }
 }
