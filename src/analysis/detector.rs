@@ -5,7 +5,7 @@ use super::{
     findings::{AnalysisResult, Finding, Severity},
     rules::RULES,
 };
-use crate::pe::{PeFile, SectionCharacteristic};
+use crate::pe::{DllCharacteristic, OptionalHeader, PeFile, SectionCharacteristic};
 
 pub fn analyze_imports(modules: &[ImportModule]) -> AnalysisResult {
     let imported: HashSet<&str> = modules
@@ -45,6 +45,40 @@ pub fn analyze_imports(modules: &[ImportModule]) -> AnalysisResult {
     let score = findings.iter().map(|f| f.score).sum::<u8>().min(100);
 
     AnalysisResult { score, findings }
+}
+
+pub fn analyze_mitigations(pe: &PeFile) -> AnalysisResult {
+    let mut findings = Vec::new();
+    let flags = match &pe.optional_header {
+        OptionalHeader::PE32(header) => &header.common.dll_characteristic_flags,
+        OptionalHeader::PE32Plus(header) => &header.common.dll_characteristic_flags,
+    };
+
+    if !flags.contains(&DllCharacteristic::NxCompat) {
+        findings.push(Finding {
+            name: "Missing DEP / NX",
+            severity: Severity::Medium,
+            score: 15,
+            evidence: vec![],
+            missing: vec!["DEP / NX".to_string()],
+        });
+    }
+
+    if !flags.contains(&DllCharacteristic::DynamicBase) {
+        findings.push(Finding {
+            name: "Missing ASLR",
+            severity: Severity::Medium,
+            score: 15,
+            evidence: vec![],
+            missing: vec!["ASLR (Dynamic Base)".to_string()],
+        });
+    }
+
+    let total_score: u8 = findings.iter().map(|f| f.score).sum::<u8>();
+    AnalysisResult {
+        score: total_score,
+        findings,
+    }
 }
 
 pub fn analyze_sections(pe: &PeFile) -> AnalysisResult {

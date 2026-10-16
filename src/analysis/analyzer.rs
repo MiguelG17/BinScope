@@ -1,4 +1,5 @@
 use crate::analysis::detector::analyze_imports;
+use crate::analysis::detector::analyze_mitigations;
 use crate::analysis::detector::analyze_sections;
 use crate::analysis::entropy::analyze_entropy;
 use crate::analysis::findings::AnalysisResult;
@@ -22,6 +23,10 @@ pub fn analyze(pe: &PeFile, data: &[u8]) -> AnalysisResult {
     let mut sections_result = analyze_sections(pe);
     accumulated_findings.append(&mut sections_result.findings);
     accumulated_score = accumulated_score.saturating_add(sections_result.score);
+
+    let mut mitigations_result = analyze_mitigations(pe);
+    accumulated_findings.append(&mut mitigations_result.findings);
+    accumulated_score = accumulated_score.saturating_add(mitigations_result.score);
 
     AnalysisResult {
         score: accumulated_score.min(100),
