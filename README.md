@@ -77,9 +77,9 @@ Current progress:
 * [x] CLI foundation
 * [x] Robust file type detection
 * [x] Architecture detection
-* [ ] PE parser
+* [x] PE parser
 * [ ] ELF parser
-* [ ] Static analysis modules
+* [x] Static analysis modules
 * [ ] Reporting system
 
 ## Roadmap
@@ -110,8 +110,8 @@ Current progress:
 * [x] COFF Header
 * [x] Optional Header
 * [x] Section Table
-* [ ] Imports
-* [ ] Exports
+* [x] Imports
+* [x] Exports
 
 ### Phase 4 — ELF Analysis
 
@@ -126,9 +126,9 @@ Current progress:
 
 * [ ] Strings
 * [ ] Cryptographic hashes
-* [ ] Entropy
-* [ ] Security mitigations
-* [ ] Suspicious imports
+* [x] Entropy
+* [x] Security mitigations
+* [x] Suspicious imports
 * [ ] Basic disassembly
 
 ### Phase 6 — Reporting
