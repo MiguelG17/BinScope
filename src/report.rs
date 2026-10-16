@@ -60,8 +60,6 @@ pub fn print_pe_report(pe: &PeFile, data: &[u8]) {
     println!();
     print_optional_header(pe);
     println!();
-    println!("Imports");
-    println!("-------");
 
     match pe.imported_dlls(data) {
         Ok(modules) => {
@@ -127,6 +125,27 @@ pub fn print_pe_report(pe: &PeFile, data: &[u8]) {
 
         Err(_) => {
             println!("Unable to read imports.");
+        }
+    }
+
+    match pe.exports(data) {
+        Ok(Some(exports)) => {
+            println!();
+            println!("Exports");
+            println!("-------");
+            println!("Library Name: {}", exports.name);
+            println!("Functions: {}", exports.functions.len());
+            println!();
+            for function in &exports.functions {
+                println!("  - {}", function);
+            }
+            println!();
+        }
+        Ok(None) => {
+            // No exports (normal in .exe)
+        }
+        Err(_) => {
+            println!("\nUnable to read exports.");
         }
     }
 }

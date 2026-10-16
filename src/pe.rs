@@ -98,6 +98,12 @@ pub struct PeFile {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct ExportInfo {
+    pub name: String,
+    pub functions: Vec<String>,
+}
+
+#[derive(Debug, PartialEq)]
 pub struct ImportModule {
     pub name: String,
     pub functions: Vec<String>,
@@ -174,6 +180,45 @@ impl PeFile {
         }
 
         Ok(modules)
+    }
+
+    pub fn exports(&self, data: &[u8]) -> Result<Option<ExportInfo>, PeError> {
+        let directories = match &self.optional_header {
+            OptionalHeader::PE32(header) => &header.common.data_directories,
+            OptionalHeader::PE32Plus(header) => &header.common.data_directories,
+        };
+        let export_directory_entry = match directories.get(DataDirectoryType::Export) {
+            Some(dir) if dir.virtual_address != 0 => dir,
+            _ => return Ok(None), // No exports
+        };
+        let mut offset = self
+            .rva_to_file_offset(export_directory_entry.virtual_address)
+            .ok_or(PeError::InvalidOffset)? as usize;
+        let export_dir = parse_export_directory(data, &mut offset)?;
+        let name_offset = self
+            .rva_to_file_offset(export_dir.name_rva)
+            .ok_or(PeError::InvalidOffset)? as usize;
+
+        let dll_name = read_c_string(data, name_offset)?;
+        let mut functions = Vec::new();
+        let names_table_offset = self
+            .rva_to_file_offset(export_dir.address_of_names)
+            .ok_or(PeError::InvalidOffset)? as usize;
+
+        let mut current = names_table_offset;
+        for _ in 0..export_dir.number_of_names {
+            let function_name_rva = read_u32(data, &mut current)?;
+            let function_name_offset = self
+                .rva_to_file_offset(function_name_rva)
+                .ok_or(PeError::InvalidOffset)? as usize;
+
+            let function_name = read_c_string(data, function_name_offset)?;
+            functions.push(function_name);
+        }
+        Ok(Some(ExportInfo {
+            name: dll_name,
+            functions,
+        }))
     }
 }
 
@@ -335,6 +380,21 @@ pub struct ImportDescriptor {
     pub forwarder_chain: u32,
     pub name_rva: u32,
     pub first_thunk: u32,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct ExportDirectory {
+    pub characteristics: u32,
+    pub time_date_stamp: u32,
+    pub major_version: u16,
+    pub minor_version: u16,
+    pub name_rva: u32,
+    pub ordinal_base: u32,
+    pub number_of_functions: u32,
+    pub number_of_names: u32,
+    pub address_of_functions: u32,
+    pub address_of_names: u32,
+    pub address_of_name_ordinals: u32,
 }
 
 pub fn parse(data: &[u8]) -> Result<PeFile, PeError> {
@@ -626,6 +686,22 @@ fn parse_import_descriptor(data: &[u8], offset: &mut usize) -> Result<ImportDesc
         forwarder_chain: read_u32(data, offset)?,
         name_rva: read_u32(data, offset)?,
         first_thunk: read_u32(data, offset)?,
+    })
+}
+
+fn parse_export_directory(data: &[u8], offset: &mut usize) -> Result<ExportDirectory, PeError> {
+    Ok(ExportDirectory {
+        characteristics: read_u32(data, offset)?,
+        time_date_stamp: read_u32(data, offset)?,
+        major_version: read_u16(data, offset)?,
+        minor_version: read_u16(data, offset)?,
+        name_rva: read_u32(data, offset)?,
+        ordinal_base: read_u32(data, offset)?,
+        number_of_functions: read_u32(data, offset)?,
+        number_of_names: read_u32(data, offset)?,
+        address_of_functions: read_u32(data, offset)?,
+        address_of_names: read_u32(data, offset)?,
+        address_of_name_ordinals: read_u32(data, offset)?,
     })
 }
 
