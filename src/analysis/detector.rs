@@ -240,4 +240,32 @@ mod tests {
         assert_eq!(analysis.findings[0].name, "RWX Section");
         assert_eq!(analysis.score, 35);
     }
+
+    #[test]
+    fn detects_mitigation() {
+        let mut common = sample_common(Magic::PE32Plus);
+        common.dll_characteristic_flags = vec![];
+        let pe = PeFile {
+            e_lfanew: 0,
+            coff_header: CoffHeader {
+                machine: Machine::AMD64,
+                number_of_sections: 0,
+                time_date_stamp: 0,
+                pointer_to_symbol_table: 0,
+                number_of_symbols: 0,
+                size_of_optional_header: 0,
+                characteristics: 0,
+            },
+            optional_header: OptionalHeader::PE32Plus(OptionalHeader64 {
+                common,
+                image_base: 0x140000000,
+            }),
+            sections: vec![],
+        };
+
+        let analysis = analyze_mitigations(&pe);
+
+        assert_eq!(analysis.findings.len(), 2);
+        assert_eq!(analysis.score, 30);
+    }
 }
